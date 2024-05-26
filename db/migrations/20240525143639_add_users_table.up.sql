@@ -5,3 +5,5 @@ CREATE TABLE IF NOT EXISTS users(
     admin BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_user_email ON users(email);

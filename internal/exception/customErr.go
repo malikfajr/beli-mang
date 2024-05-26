@@ -39,3 +39,10 @@ func Unauthorized(msg string) *CustomError {
 		StatusCode: http.StatusUnauthorized,
 	}
 }
+
+func ServerError(msg string) *CustomError {
+	return &CustomError{
+		Message:    msg,
+		StatusCode: http.StatusInternalServerError,
+	}
+}
