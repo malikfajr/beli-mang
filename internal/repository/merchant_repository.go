@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"log"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -102,7 +101,6 @@ func (m *MerchantRepo) AddProduct(ctx context.Context, pool *pgxpool.Pool, produ
 
 	tag, err := pool.Exec(ctx, query, product.Id, product.MerchantId, product.Name, product.Category, product.Price, product.ImageUrl)
 	if err != nil {
-		log.Println(query, product, err.Error())
 		panic(err)
 	}
 

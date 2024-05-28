@@ -29,5 +29,8 @@ func NewRoutes(e *echo.Echo, pool *pgxpool.Pool) {
 	adminMerchant.POST("/:merchantId/items", merchantHandler.AddProduct)
 	adminMerchant.GET("/:merchantId/items", merchantHandler.GetProducts)
 
-	merchantHandler.ResetCache(1 * time.Minute)
+	merchantHandler.ResetCache(3 * time.Minute)
+
+	imageHandler := &handler.ImageHandler{}
+	e.POST("/image", imageHandler.Upload, middleware.Auth("admin"))
 }

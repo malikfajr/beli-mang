@@ -44,8 +44,8 @@ func (a *userHandler) Register(c echo.Context) error {
 		panic(err)
 	}
 
-	return c.JSON(http.StatusCreated, map[string]string{
-		"token": token.CreateToken(payload.Username, true),
+	return c.JSON(http.StatusCreated, &entity.UserResponse{
+		Token: token.CreateToken(payload.Username, true),
 	})
 }
 
@@ -71,7 +71,7 @@ func (a *userHandler) Login(c echo.Context) error {
 		panic(err)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"token": token.CreateToken(payload.Username, true),
+	return c.JSON(http.StatusOK, &entity.UserResponse{
+		Token: token.CreateToken(payload.Username, true),
 	})
 }
