@@ -32,19 +32,3 @@ type MerchantParams struct {
 	Category   string `query:"merchantCategory"`
 	CreatedAt  string `query:"createdAt"`
 }
-
-// Merchant Item
-type MerchantItem struct {
-	Id         string     `json:"itemId"`
-	MerchantId string     `json:"-"`
-	Name       string     `json:"name"`
-	Category   string     `json:"productCategory"`
-	Price      uint       `json:"price"`
-	ImageUrl   string     `json:"imageUrl"`
-	CreatedAt  *time.Time `json:"createdAt"`
-}
-
-type AddMerchantItemPayload struct {
-	Id string `path:"merchantId"`
-	// TODO: Fix the items payload
-}

@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"time"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
 	"github.com/malikfajr/beli-mang/internal/server/handler"
@@ -24,4 +26,8 @@ func NewRoutes(e *echo.Echo, pool *pgxpool.Pool) {
 	adminMerchant := e.Group("/admin/merchants", middleware.Auth("admin"))
 	adminMerchant.POST("", merchantHandler.Create)
 	adminMerchant.GET("", merchantHandler.GetAll)
+	adminMerchant.POST("/:merchantId/items", merchantHandler.AddProduct)
+	adminMerchant.GET("/:merchantId/items", merchantHandler.GetProducts)
+
+	merchantHandler.ResetCache(1 * time.Minute)
 }

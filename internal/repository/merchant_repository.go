@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -94,4 +95,46 @@ func (m *MerchantRepo) GetAll(ctx context.Context, pool *pgxpool.Pool, username 
 	}
 
 	return merchants
+}
+
+func (m *MerchantRepo) AddProduct(ctx context.Context, pool *pgxpool.Pool, product *entity.Product) error {
+	query := "INSERT INTO products(id, merchant_id, name, category, price, image_url) VALUES($1, $2, $3, $4, $5, $6)"
+
+	tag, err := pool.Exec(ctx, query, product.Id, product.MerchantId, product.Name, product.Category, product.Price, product.ImageUrl)
+	if err != nil {
+		log.Println(query, product, err.Error())
+		panic(err)
+	}
+
+	if tag.RowsAffected() == 0 {
+		return errors.New("Failed to insert items")
+	}
+
+	return nil
+}
+
+func (m *MerchantRepo) GetProducts(ctx context.Context, pool *pgxpool.Pool, params *entity.ProductParams) []entity.Product {
+	query := "SELECT id, name, category, price, image_url, created_at FROM products WHERE merchant_id = @merchant_id "
+	args := pgx.NamedArgs{
+		"merchant_id": params.MerchantId,
+		"limit":       params.Limit,
+		"offset":      params.Offset,
+	}
+
+	query += " LIMIT @limit OFFSET @offset"
+
+	rows, err := pool.Query(ctx, query, args)
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+
+	products := make([]entity.Product, 0)
+	for rows.Next() {
+		product := &entity.Product{}
+		rows.Scan(&product.Id, &product.Name, &product.Category, &product.Price, &product.ImageUrl, &product.CreatedAt)
+		products = append(products, *product)
+	}
+
+	return products
 }

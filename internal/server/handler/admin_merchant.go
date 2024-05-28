@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v4"
@@ -13,12 +14,14 @@ import (
 )
 
 type merchantHandler struct {
-	pool *pgxpool.Pool
+	pool           *pgxpool.Pool
+	manageMerchant usecase.ManageMerchant
 }
 
 func NewMerchantHandler(pool *pgxpool.Pool) *merchantHandler {
 	return &merchantHandler{
-		pool: pool,
+		pool:           pool,
+		manageMerchant: usecase.NewManageMerchant(pool),
 	}
 }
 
@@ -35,8 +38,7 @@ func (m *merchantHandler) Create(c echo.Context) error {
 
 	user := c.Get("user").(*token.JwtClaim)
 
-	manageMerchant := usecase.NewManageMerchant(m.pool)
-	merchant, err := manageMerchant.Create(c.Request().Context(), user.Username, payload)
+	merchant, err := m.manageMerchant.Create(c.Request().Context(), user.Username, payload)
 	if err != nil {
 		ex, ok := err.(*exception.CustomError)
 		if ok {
@@ -56,8 +58,7 @@ func (m *merchantHandler) GetAll(c echo.Context) error {
 
 	c.Bind(params)
 
-	manageMerchant := usecase.NewManageMerchant(m.pool)
-	merchants, err := manageMerchant.GetAll(c.Request().Context(), user.Username, params)
+	merchants, err := m.manageMerchant.GetAll(c.Request().Context(), user.Username, params)
 	if err != nil {
 		ex, ok := err.(*exception.CustomError)
 		if ok {
@@ -78,4 +79,67 @@ func (m *merchantHandler) GetAll(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, response)
+}
+
+func (m *merchantHandler) AddProduct(c echo.Context) error {
+	payload := &entity.AddProductPayload{}
+	merchantId := c.Param("merchantId")
+
+	if err := c.Bind(payload); err != nil {
+		return c.JSON(http.StatusBadRequest, exception.BadRequest("request doesn't pass validation"))
+	}
+
+	if err := c.Validate(payload); err != nil {
+		return c.JSON(http.StatusBadRequest, exception.BadRequest("request doesn't pass validation"))
+	}
+
+	data, err := m.manageMerchant.AddProduct(c.Request().Context(), merchantId, payload)
+	if err != nil {
+		ex, ok := err.(*exception.CustomError)
+		if ok {
+			return c.JSON(ex.StatusCode, ex)
+		}
+		panic(err)
+	}
+
+	return c.JSON(http.StatusCreated, &entity.ProductResponse{
+		Id: data.Id,
+	})
+}
+
+func (m *merchantHandler) GetProducts(c echo.Context) error {
+	user := c.Get("user").(*token.JwtClaim)
+	params := &entity.ProductParams{}
+
+	c.Bind(params)
+
+	data, err := m.manageMerchant.GetProducts(c.Request().Context(), user.Username, params)
+	if err != nil {
+		ex, ok := err.(*exception.CustomError)
+		if ok {
+			return c.JSON(ex.StatusCode, ex)
+		}
+		panic(err)
+	}
+
+	return c.JSON(http.StatusOK, &converter.ProductResponse{
+		Data: data,
+		Meta: &converter.Meta{
+			Limit:  params.Limit,
+			Offset: params.Offset,
+			Total:  len(*data),
+		},
+	})
+}
+
+func (m *merchantHandler) ResetCache(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		for {
+			<-ticker.C
+			m.manageMerchant.ResetData()
+		}
+	}()
 }
