@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS products(
     category VARCHAR(10) NOT NULL,
     price INT NOT NULL,
     image_url TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     FOREIGN KEY (merchant_id) REFERENCES merchants(id) 
     ON UPDATE CASCADE ON DELETE CASCADE

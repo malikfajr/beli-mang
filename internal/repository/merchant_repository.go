@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/malikfajr/beli-mang/internal/entity"
+	"github.com/mmcloughlin/geohash"
 )
 
 type MerchantRepo struct{}
@@ -27,7 +28,7 @@ func (m *MerchantRepo) GetById(ctx context.Context, pool *pgxpool.Pool, merchant
 }
 
 func (m *MerchantRepo) Insert(ctx context.Context, pool *pgxpool.Pool, merchant *entity.Merchant) error {
-	query := "INSERT INTO merchants(id, username_admin, name, category, image_url, lat, long) VALUES(@id, @username,  @name, @category, @image, @lat, @long) ON CONFLICT DO NOTHING"
+	query := "INSERT INTO merchants(id, username_admin, name, category, image_url, lat, long, geohash) VALUES(@id, @username,  @name, @category, @image, @lat, @long, @geohash) ON CONFLICT DO NOTHING"
 	args := pgx.NamedArgs{
 		"id":       merchant.Id,
 		"username": merchant.Username,
@@ -36,6 +37,7 @@ func (m *MerchantRepo) Insert(ctx context.Context, pool *pgxpool.Pool, merchant 
 		"image":    merchant.ImageUrl,
 		"lat":      merchant.Location.Lat,
 		"long":     merchant.Location.Long,
+		"geohash": geohash.Encode(merchant.Location.Lat, merchant.Location.Long),
 	}
 
 	tag, err := pool.Exec(ctx, query, args)
@@ -52,7 +54,7 @@ func (m *MerchantRepo) Insert(ctx context.Context, pool *pgxpool.Pool, merchant 
 
 func (m *MerchantRepo) GetAll(ctx context.Context, pool *pgxpool.Pool, username string, params *entity.MerchantParams) []entity.Merchant {
 
-	query := "SELECT id, username_admin, name, category, image_url, lat, long, created_at  FROM merchants WHERE username_admin = @username"
+	query := "SELECT id, username_admin, name, category, image_url, lat, long, geohash, created_at  FROM merchants WHERE username_admin = @username"
 	args := pgx.NamedArgs{
 		"username": username,
 	}
@@ -87,7 +89,7 @@ func (m *MerchantRepo) GetAll(ctx context.Context, pool *pgxpool.Pool, username 
 		merchant := &entity.Merchant{}
 		coordinate := &entity.Coordinate{}
 
-		rows.Scan(&merchant.Id, &merchant.Username, &merchant.Name, &merchant.Category, &merchant.ImageUrl, &coordinate.Lat, &coordinate.Long, &merchant.CreatedAt)
+		rows.Scan(&merchant.Id, &merchant.Username, &merchant.Name, &merchant.Category, &merchant.ImageUrl, &coordinate.Lat, &coordinate.Long, &merchant.Geohash, &merchant.CreatedAt)
 		merchant.Location = coordinate
 
 		merchants = append(merchants, *merchant)

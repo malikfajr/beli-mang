@@ -19,6 +19,7 @@ func Run() {
 	e.HideBanner = true
 	e.Use(middleware.Recover())
 	e.Use(middleware.Logger())
+	e.Use(middleware.CORS())
 
 	e.Validator = customvalidator.NewCustomValidator(validator.New())
 

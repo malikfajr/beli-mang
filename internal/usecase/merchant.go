@@ -50,6 +50,8 @@ func (m *manageMerchant) Create(ctx context.Context, username string, payload *e
 		return nil, exception.ServerError(err.Error())
 	}
 
+	m.Lock()
+	defer m.Unlock()
 	m.id[merchant.Id] = username
 
 	return merchant, nil

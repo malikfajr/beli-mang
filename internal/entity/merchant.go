@@ -14,6 +14,7 @@ type Merchant struct {
 	Category  string      `json:"merchantCategory"`
 	ImageUrl  string      `json:"imageUrl"`
 	Location  *Coordinate `json:"location"`
+	Geohash   string      `json:"-"`
 	CreatedAt *time.Time  `json:"createdAt"`
 }
 
