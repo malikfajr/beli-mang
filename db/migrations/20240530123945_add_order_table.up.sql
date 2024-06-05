@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS orders(
+    id CHAR(26) PRIMARY KEY,
+    username CHAR(26),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+
+    FOREIGN KEY (username) REFERENCES users(username) ON UPDATE CASCADE ON DELETE CASCADE
+);

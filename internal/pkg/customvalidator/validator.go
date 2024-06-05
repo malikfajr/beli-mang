@@ -23,5 +23,7 @@ func NewCustomValidator(validator *validator.Validate) *customValidator {
 		validator: validator,
 	}
 
+	cv.validator.RegisterValidation("imageUrl", validImageUrl)
+
 	return cv
 }

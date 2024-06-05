@@ -21,7 +21,7 @@ type Merchant struct {
 type AddMerchantPayload struct {
 	Name     string      `json:"name" validate:"required,min=2,max=30"`
 	Category string      `json:"merchantCategory" validate:"required,oneof=SmallRestaurant	MediumRestaurant LargeRestaurant MerchandiseRestaurant BoothKiosk ConvenienceStore"`
-	ImageUrl string      `json:"imageUrl" validate:"required"`
+	ImageUrl string      `json:"imageUrl" validate:"required,imageUrl"`
 	Location *Coordinate `json:"location" validate:"required"`
 }
 

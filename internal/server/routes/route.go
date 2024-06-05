@@ -37,8 +37,8 @@ func NewRoutes(e *echo.Echo, pool *pgxpool.Pool) {
 	purchaseHanlder := handler.NewPurchasehandler(pool)
 	e.GET("/merchant/nearby/:coordinate", purchaseHanlder.GetMerchantNearby, middleware.Auth("user"))
 
-	// userProtected := e.Group("/users", middleware.Auth("user"))
-	// userProtected.GET("/estimate")
-	// userProtected.POST("/orders")
+	userProtected := e.Group("/users", middleware.Auth("user"))
+	userProtected.POST("/estimate", purchaseHanlder.CreateEstimate)
+	userProtected.POST("/orders", purchaseHanlder.PostOrder)
 	// userProtected.GET("/orders")
 }

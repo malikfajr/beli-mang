@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,7 +38,7 @@ func (m *MerchantRepo) Insert(ctx context.Context, pool *pgxpool.Pool, merchant 
 		"image":    merchant.ImageUrl,
 		"lat":      merchant.Location.Lat,
 		"long":     merchant.Location.Long,
-		"geohash": geohash.Encode(merchant.Location.Lat, merchant.Location.Long),
+		"geohash":  geohash.Encode(merchant.Location.Lat, merchant.Location.Long),
 	}
 
 	tag, err := pool.Exec(ctx, query, args)
@@ -54,14 +55,14 @@ func (m *MerchantRepo) Insert(ctx context.Context, pool *pgxpool.Pool, merchant 
 
 func (m *MerchantRepo) GetAll(ctx context.Context, pool *pgxpool.Pool, username string, params *entity.MerchantParams) []entity.Merchant {
 
-	query := "SELECT id, username_admin, name, category, image_url, lat, long, geohash, created_at  FROM merchants WHERE username_admin = @username"
+	query := "SELECT id, username_admin, name, category, image_url, lat, long, geohash, created_at  FROM merchants WHERE TRUE "
 	args := pgx.NamedArgs{
-		"username": username,
+		// "username": username,
 	}
 
 	if params.Name != "" {
 		query += " AND LOWER(name) like @name"
-		args["name"] = "%" + params.Name + "%"
+		args["name"] = "%" + strings.ToLower(params.Name) + "%"
 	}
 
 	if params.Category != "" {
@@ -71,6 +72,8 @@ func (m *MerchantRepo) GetAll(ctx context.Context, pool *pgxpool.Pool, username 
 
 	if params.CreatedAt != "" {
 		query += " ORDER BY created_at " + params.CreatedAt
+	} else {
+		query += " ORDER BY created_at desc"
 	}
 
 	query += " LIMIT @limit OFFSET @offset"
@@ -98,6 +101,31 @@ func (m *MerchantRepo) GetAll(ctx context.Context, pool *pgxpool.Pool, username 
 	return merchants
 }
 
+func (m *MerchantRepo) GetTotalMerchant(ctx context.Context, pool *pgxpool.Pool, username string, params *entity.MerchantParams) int {
+	query := "SELECT COUNT(id) FROM merchants WHERE TRUE "
+	args := pgx.NamedArgs{
+		// "username": username,
+	}
+
+	if params.Name != "" {
+		query += " AND LOWER(name) like @name"
+		args["name"] = "%" + strings.ToLower(params.Name) + "%"
+	}
+
+	if params.Category != "" {
+		query += " AND category = @category"
+		args["category"] = params.Category
+	}
+
+	var total int
+	err := pool.QueryRow(ctx, query, args).Scan(&total)
+	if err != nil {
+		return 0
+	}
+
+	return total
+}
+
 func (m *MerchantRepo) AddProduct(ctx context.Context, pool *pgxpool.Pool, product *entity.Product) error {
 	query := "INSERT INTO products(id, merchant_id, name, category, price, image_url) VALUES($1, $2, $3, $4, $5, $6)"
 
@@ -121,6 +149,27 @@ func (m *MerchantRepo) GetProducts(ctx context.Context, pool *pgxpool.Pool, para
 		"offset":      params.Offset,
 	}
 
+	if params.Id != "" {
+		query += " AND id = @id"
+		args["id"] = params.Id
+	}
+
+	if params.Name != "" {
+		query += " AND LOWER(name) LIKE @name"
+		args["name"] = "%" + params.Name + "%"
+	}
+
+	if params.Category != "" {
+		query += " AND category = @category"
+		args["category"] = params.Category
+	}
+
+	if params.CreatedAt != "" {
+		query += " ORDER BY created_at " + params.CreatedAt
+	} else {
+		query += " ORDER BY created_at desc"
+	}
+
 	query += " LIMIT @limit OFFSET @offset"
 
 	rows, err := pool.Query(ctx, query, args)
@@ -137,4 +186,36 @@ func (m *MerchantRepo) GetProducts(ctx context.Context, pool *pgxpool.Pool, para
 	}
 
 	return products
+}
+
+func (m *MerchantRepo) GetTotalProduct(ctx context.Context, pool *pgxpool.Pool, params *entity.ProductParams) int {
+	var total int
+	query := "SELECT COUNT(id) products WHERE merchant_id = @merchant_id "
+	args := pgx.NamedArgs{
+		"merchant_id": params.MerchantId,
+	}
+
+	if params.Id != "" {
+		query += " AND id = @id"
+		args["id"] = params.Id
+	}
+
+	if params.Name != "" {
+		query += " AND LOWER(name) LIKE @name"
+		args["name"] = "%" + params.Name + "%"
+	}
+
+	if params.Category != "" {
+		query += " AND category = @category"
+		args["category"] = params.Category
+	}
+
+	query += " LIMIT 1"
+
+	err := pool.QueryRow(ctx, query, args).Scan(&total)
+	if err != nil {
+		return 0
+	}
+
+	return total
 }

@@ -16,7 +16,7 @@ type AddProductPayload struct {
 	Name     string `json:"name" validate:"required,min=2,max=30"`
 	Category string `json:"productCategory" validate:"required,oneof=Beverage Food Snack Condiments Additions"`
 	Price    uint   `json:"price" validate:"required"`
-	ImageUrl string `json:"imageUrl" validate:"required"`
+	ImageUrl string `json:"imageUrl" validate:"required,imageUrl"`
 }
 
 type ProductResponse struct {

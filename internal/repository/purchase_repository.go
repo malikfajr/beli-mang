@@ -13,7 +13,6 @@ import (
 
 type PurchaseRepo struct{}
 
-// TODO: Add params for filter
 func (p *PurchaseRepo) GetMerchantNearby(ctx context.Context, pool *pgxpool.Pool, lat float64, long float64, params *converter.MerchanNearbyParams) []converter.MerchanNearby {
 	userGeohash := geohash.Encode(lat, long)
 	geoPrefix := userGeohash[:3]
@@ -44,9 +43,6 @@ func (p *PurchaseRepo) GetMerchantNearby(ctx context.Context, pool *pgxpool.Pool
 		merchants m
 	WHERE
 		m.geohash LIKE @geoparam
-	ORDER BY
-		distance
-	LIMIT @limit OFFSET @offset;
 	`
 
 	args := pgx.NamedArgs{
@@ -56,6 +52,25 @@ func (p *PurchaseRepo) GetMerchantNearby(ctx context.Context, pool *pgxpool.Pool
 		"offset":   int(params.Offset),
 		"geoparam": geoPrefix + "%",
 	}
+
+	if params.MerchantId != "" {
+		query += " AND m.id = @m_id"
+		args["m_id"] = params.MerchantId
+	}
+
+	if params.Category != "" {
+		query += " AND m.category = @m_category"
+		args["m_category"] = params.Category
+	}
+
+	if params.Name != "" {
+		query += " AND m.name = @m_name"
+		args["m_name"] = params.Name
+	}
+
+	query += `
+	ORDER BY distance
+	LIMIT @limit OFFSET @offset;`
 
 	rows, err := pool.Query(ctx, query, args)
 	if err != nil {
@@ -88,4 +103,20 @@ func (p *PurchaseRepo) GetMerchantNearby(ctx context.Context, pool *pgxpool.Pool
 	}
 
 	return data
+}
+
+func (p *PurchaseRepo) GetMerchantBydIds(ctx context.Context, pool *pgxpool.Pool, merchantIds []string, lat float64, long float64) {
+	hash := geohash.Encode(lat, long)
+
+	query := "SELECT id, username, name, category, image_url, lat, long, created_at, haversine($1, $2, lat, long) AS distance FROM merchants WHERE geohash LIKE $3, id = ANY($4) ORDER BY distance"
+
+	rows, err := pool.Query(ctx, query, lat, long, hash[:3], merchantIds)
+	if err != nil {
+		panic(err)
+	}
+
+	for rows.Next() {
+
+	}
+
 }

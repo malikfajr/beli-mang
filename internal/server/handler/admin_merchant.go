@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -33,6 +34,7 @@ func (m *merchantHandler) Create(c echo.Context) error {
 	}
 
 	if err := c.Validate(payload); err != nil {
+		log.Println(err.Error())
 		return c.JSON(http.StatusBadRequest, exception.BadRequest("request doesn't pass validation"))
 	}
 
@@ -58,7 +60,7 @@ func (m *merchantHandler) GetAll(c echo.Context) error {
 
 	c.Bind(params)
 
-	merchants, err := m.manageMerchant.GetAll(c.Request().Context(), user.Username, params)
+	merchants, total, err := m.manageMerchant.GetAll(c.Request().Context(), user.Username, params)
 	if err != nil {
 		ex, ok := err.(*exception.CustomError)
 		if ok {
@@ -70,7 +72,7 @@ func (m *merchantHandler) GetAll(c echo.Context) error {
 	meta := &converter.Meta{
 		Limit:  params.Limit,
 		Offset: params.Offset,
-		Total:  len(*merchants),
+		Total:  total,
 	}
 
 	response := &converter.MerchantResponse{
@@ -113,7 +115,7 @@ func (m *merchantHandler) GetProducts(c echo.Context) error {
 
 	c.Bind(params)
 
-	data, err := m.manageMerchant.GetProducts(c.Request().Context(), user.Username, params)
+	data, total, err := m.manageMerchant.GetProducts(c.Request().Context(), user.Username, params)
 	if err != nil {
 		ex, ok := err.(*exception.CustomError)
 		if ok {
@@ -127,7 +129,7 @@ func (m *merchantHandler) GetProducts(c echo.Context) error {
 		Meta: &converter.Meta{
 			Limit:  params.Limit,
 			Offset: params.Offset,
-			Total:  len(*data),
+			Total:  total,
 		},
 	})
 }

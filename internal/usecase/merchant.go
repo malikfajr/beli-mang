@@ -19,9 +19,9 @@ type manageMerchant struct {
 
 type ManageMerchant interface {
 	Create(ctx context.Context, username string, payload *entity.AddMerchantPayload) (*entity.Merchant, error)
-	GetAll(ctx context.Context, username string, params *entity.MerchantParams) (*[]entity.Merchant, error)
+	GetAll(ctx context.Context, username string, params *entity.MerchantParams) (*[]entity.Merchant, int, error)
 	AddProduct(ctx context.Context, merchantId string, payload *entity.AddProductPayload) (*entity.Product, error)
-	GetProducts(ctx context.Context, username string, params *entity.ProductParams) (*[]entity.Product, error)
+	GetProducts(ctx context.Context, username string, params *entity.ProductParams) (*[]entity.Product, int, error)
 	ResetData()
 }
 
@@ -57,19 +57,20 @@ func (m *manageMerchant) Create(ctx context.Context, username string, payload *e
 	return merchant, nil
 }
 
-func (m *manageMerchant) GetAll(ctx context.Context, username string, params *entity.MerchantParams) (*[]entity.Merchant, error) {
+func (m *manageMerchant) GetAll(ctx context.Context, username string, params *entity.MerchantParams) (*[]entity.Merchant, int, error) {
 	if params.Limit == 0 {
 		params.Limit = 5
 	}
 
-	if params.CreatedAt != "asc" || params.CreatedAt != "desc" {
+	if validOrder(params.CreatedAt) == false {
 		params.CreatedAt = ""
 	}
 
 	merchantRepo := &repository.MerchantRepo{}
 	merchants := merchantRepo.GetAll(ctx, m.pool, username, params)
+	total := merchantRepo.GetTotalMerchant(ctx, m.pool, username, params)
 
-	return &merchants, nil
+	return &merchants, total, nil
 }
 
 func (m *manageMerchant) AddProduct(ctx context.Context, merchantId string, payload *entity.AddProductPayload) (*entity.Product, error) {
@@ -95,23 +96,24 @@ func (m *manageMerchant) AddProduct(ctx context.Context, merchantId string, payl
 	return product, nil
 }
 
-func (m *manageMerchant) GetProducts(ctx context.Context, username string, params *entity.ProductParams) (*[]entity.Product, error) {
+func (m *manageMerchant) GetProducts(ctx context.Context, username string, params *entity.ProductParams) (*[]entity.Product, int, error) {
 	if err := m.isFound(&username, params.MerchantId); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	if params.Limit <= 0 {
 		params.Limit = 5
 	}
 
-	if params.CreatedAt != "asc" || params.CreatedAt != "desc" {
+	if validOrder(params.CreatedAt) == false {
 		params.CreatedAt = ""
 	}
 
 	merchantRepo := &repository.MerchantRepo{}
 	products := merchantRepo.GetProducts(ctx, m.pool, params)
+	total := merchantRepo.GetTotalProduct(ctx, m.pool, params)
 
-	return &products, nil
+	return &products, total, nil
 }
 
 func (m *manageMerchant) isFound(username *string, merchantId string) error {
@@ -151,4 +153,14 @@ func (m *manageMerchant) ResetData() {
 	defer m.Unlock()
 
 	m.id = make(map[string]string, 0)
+}
+
+func validOrder(key string) bool {
+	order := map[string]bool{
+		"asc":  true,
+		"desc": true,
+	}
+
+	_, ok := order[key]
+	return ok
 }

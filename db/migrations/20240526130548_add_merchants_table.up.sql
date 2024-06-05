@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS merchants(
     lat NUMERIC NOT NULL,
     long NUMERIC NOT NULL,
     geohash VARCHAR(12) NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
 
     FOREIGN KEY (username_admin) REFERENCES users(username) ON UPDATE CASCADE ON DELETE CASCADE
 );
