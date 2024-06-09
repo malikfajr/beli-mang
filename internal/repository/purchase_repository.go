@@ -3,9 +3,13 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/malikfajr/beli-mang/internal/driver/db"
 	"github.com/malikfajr/beli-mang/internal/entity"
 	"github.com/malikfajr/beli-mang/internal/entity/converter"
 	"github.com/mmcloughlin/geohash"
@@ -105,6 +109,47 @@ func (p *PurchaseRepo) GetMerchantNearby(ctx context.Context, pool *pgxpool.Pool
 	return data
 }
 
+func (p *PurchaseRepo) TotalMerchantNearby(ctx context.Context, pool *pgxpool.Pool, lat float64, long float64, params *converter.MerchanNearbyParams) int {
+	userGeohash := geohash.Encode(lat, long)
+	geoPrefix := userGeohash[:3]
+
+	query := `
+		SELECT
+		COUNT(m.id)
+	FROM
+		merchants m
+	WHERE
+		m.geohash LIKE @geoparam
+	`
+
+	args := pgx.NamedArgs{
+		"geoparam": geoPrefix + "%",
+	}
+
+	if params.MerchantId != "" {
+		query += " AND m.id = @m_id"
+		args["m_id"] = params.MerchantId
+	}
+
+	if params.Category != "" {
+		query += " AND m.category = @m_category"
+		args["m_category"] = params.Category
+	}
+
+	if params.Name != "" {
+		query += " AND m.name = @m_name"
+		args["m_name"] = params.Name
+	}
+
+	var total int
+	err := pool.QueryRow(ctx, query, args).Scan(&total)
+	if err != nil {
+		return 0
+	}
+
+	return total
+}
+
 func (p *PurchaseRepo) GetMerchantBydIds(ctx context.Context, pool *pgxpool.Pool, merchantIds []string, lat float64, long float64) {
 	hash := geohash.Encode(lat, long)
 
@@ -119,4 +164,140 @@ func (p *PurchaseRepo) GetMerchantBydIds(ctx context.Context, pool *pgxpool.Pool
 
 	}
 
+}
+
+func (p *PurchaseRepo) GetHistory(ctx context.Context, pool *pgxpool.Pool, params *entity.OrderHistoryParams) []entity.OrderHistory {
+
+	rows, err := pool.Query(ctx, p.generateQueryOrderHistory(params))
+	if err != nil {
+		panic(err)
+	}
+	defer rows.Close()
+
+	history := []entity.OrderHistory{}
+	merchants := make(map[string]map[string]*entity.OrderDetail)
+
+	for rows.Next() {
+		var orderID, merchantID, merchantName, merchantCategory, merchantImageURL, productID, productName, productCategory, productImageURL string
+		var merchantLat, merchantLong float64
+		var productPrice float64
+		var orderItemQuantity int
+		var merchantCreatedAt, orderItemCreatedAt time.Time
+
+		err := rows.Scan(&orderID, &merchantID, &merchantName,
+			&merchantCategory, &merchantImageURL, &merchantLat,
+			&merchantLong, &merchantCreatedAt, &productID,
+			&productName, &productCategory, &productPrice,
+			&productImageURL, &orderItemQuantity, &orderItemCreatedAt)
+
+		if err != nil {
+			panic(err)
+		}
+
+		if _, exist := merchants[orderID][merchantID]; exist == false {
+			if _, order := merchants[orderID]; order == false {
+				merchants[orderID] = make(map[string]*entity.OrderDetail)
+			}
+
+			merchants[orderID][merchantID] = &entity.OrderDetail{
+				Merchant: entity.Merchant{
+					Id:       merchantID,
+					Name:     merchantName,
+					Category: merchantCategory,
+					ImageUrl: merchantImageURL,
+					Location: &entity.Coordinate{
+						Lat:  merchantLat,
+						Long: merchantLong,
+					},
+					CreatedAt: &merchantCreatedAt,
+				},
+				Items: []entity.ItemHistory{},
+			}
+		}
+
+		items := &merchants[orderID][merchantID].Items
+		*items = append(*items, entity.ItemHistory{
+			Product: entity.Product{
+				Id:        productID,
+				Name:      productName,
+				Category:  productCategory,
+				Price:     uint(productPrice),
+				ImageUrl:  productImageURL,
+				CreatedAt: &orderItemCreatedAt,
+			},
+			Quantity: orderItemQuantity,
+		})
+	}
+
+	orderMap := make(map[string]*entity.OrderHistory)
+
+	for orderId, order := range merchants {
+		orderMap[orderId] = &entity.OrderHistory{
+			OrderId: orderId,
+			Orders:  []entity.OrderDetail{},
+		}
+
+		for _, detail := range order {
+			order := orderMap[orderId]
+			order.Orders = append(order.Orders, *detail)
+		}
+	}
+
+	for _, orderResponse := range orderMap {
+		history = append(history, *orderResponse)
+	}
+
+	return history
+}
+
+func (p *PurchaseRepo) generateQueryOrderHistory(params *entity.OrderHistoryParams) string {
+	query := `
+		WITH limited_orders AS (
+		SELECT *
+		FROM orders
+		WHERE username = '` + db.Escape(params.Username) + `'
+		ORDER BY created_at DESC
+		LIMIT ` + strconv.Itoa(int(params.Limit)) + ` 
+		OFFSET ` + strconv.Itoa(int(params.Offset)) + `
+		)
+	`
+
+	query += `
+		SELECT 
+			lo.id as order_id,
+			m.id as merchant_id,
+			m.name as merchant_name,
+			m.category as merchant_category,
+			m.image_url as merchant_image_url,
+			m.lat as merchant_location_lat,
+			m.long as merchant_location_long,
+			m.created_at as merchant_created_at,
+			p.id as product_id,
+			p.name as product_name,
+			p.category as product_category,
+			p.price as product_price,
+			p.image_url as product_image_url,
+			oi.quantity as order_item_quantity,
+			oi.created_at as order_item_created_at
+		FROM limited_orders lo
+		JOIN order_items oi ON lo.id = oi.order_id
+		JOIN products p ON oi.item_id = p.id
+		JOIN merchants m ON oi.merchant_id = m.id
+		WHERE TRUE
+	`
+
+	if params.MerchantId != "" {
+		query += " AND m.id = '" + db.Escape(params.MerchantId) + "'"
+	}
+
+	if params.Name != "" {
+		query += " AND (LOWER(m.name) LIKE '%" + db.Escape(strings.ToLower(params.Name))
+		query += "%' OR LOWER(p.name) LIKE '%" + db.Escape(strings.ToLower(params.Name)) + "%')"
+	}
+
+	if params.MerchantCategory != "" {
+		query += " AND m.category = '" + db.Escape(params.MerchantCategory) + "'"
+	}
+
+	return query
 }

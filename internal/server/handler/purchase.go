@@ -41,6 +41,7 @@ type PurchaseHandler interface {
 	GetMerchantNearby(c echo.Context) error
 	CreateEstimate(c echo.Context) error
 	PostOrder(c echo.Context) error
+	GetHistory(c echo.Context) error
 }
 
 func NewPurchasehandler(pool *pgxpool.Pool) PurchaseHandler {
@@ -51,12 +52,27 @@ func NewPurchasehandler(pool *pgxpool.Pool) PurchaseHandler {
 	}
 }
 
+// GetHistory implements PurchaseHandler.
+func (p *purchaseHandler) GetHistory(c echo.Context) error {
+	user := c.Get("user").(*token.JwtClaim)
+	params := &entity.OrderHistoryParams{}
+
+	c.Bind(params)
+
+	params.Username = user.Username
+
+	history := p.pcase.GetHistory(c.Request().Context(), params)
+
+	return c.JSON(http.StatusOK, history)
+
+}
+
 func (p *purchaseHandler) GetMerchantNearby(c echo.Context) error {
 	params := &converter.MerchanNearbyParams{}
 
 	c.Bind(params)
 
-	data, err := p.pcase.GetMerchantNearby(c.Request().Context(), params)
+	data, total, err := p.pcase.GetMerchantNearby(c.Request().Context(), params)
 	if err != nil {
 		ex, ok := err.(*exception.CustomError)
 		if ok {
@@ -70,7 +86,7 @@ func (p *purchaseHandler) GetMerchantNearby(c echo.Context) error {
 		Meta: &converter.Meta{
 			Limit:  params.Limit,
 			Offset: params.Offset,
-			Total:  len(*data),
+			Total:  total,
 		},
 	})
 }
@@ -86,8 +102,11 @@ func (p *purchaseHandler) CreateEstimate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, exception.BadRequest("request doesn't pass validation"))
 	}
 
-	if err := p.validatePayloadOrder(&payload); err != nil {
-		return c.JSON(http.StatusBadRequest, exception.BadRequest(err.Error()))
+	if err, statusCode := p.validatePayloadOrder(&payload); err != nil {
+		return c.JSON(statusCode, exception.CustomError{
+			Message:    err.Error(),
+			StatusCode: statusCode,
+		})
 	}
 
 	// Retrieve merchant locations
@@ -96,7 +115,7 @@ func (p *purchaseHandler) CreateEstimate(c echo.Context) error {
 		var location entity.Coordinate
 		err := p.pool.QueryRow(context.Background(), "SELECT lat, long FROM merchants WHERE id = $1", order.MerchantId).Scan(&location.Lat, &location.Long)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, exception.BadRequest("Merchant id not found"))
+			return c.JSON(http.StatusNotFound, exception.NotFound("Merchant id not found"))
 		}
 		merchants[order.MerchantId] = location
 	}
@@ -121,15 +140,7 @@ func (p *purchaseHandler) CreateEstimate(c echo.Context) error {
 
 	// Save calculation to database
 	calculationID := ulid.Make().String()
-	// _, err = p.pool.Exec(context.Background(), "INSERT INTO calculations (id, user_lat, user_long, total_price, estimated_delivery_time_in_minutes) VALUES ($1, $2, $3, $4, $5)",
-	// 	calculationID, payload.UserLocation.Lat, payload.UserLocation.Long, totalPrice, totalTravelTime)
-	// if err != nil {
-	// 	return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save calculation"})
-	// }
 
-	// query := `
-	// 	SELECT
-	// `
 	go p.SaveEstimate(calculationID, payload)
 
 	return c.JSON(http.StatusOK, entity.EstimateResponse{
@@ -139,8 +150,11 @@ func (p *purchaseHandler) CreateEstimate(c echo.Context) error {
 	})
 }
 
-func (p *purchaseHandler) validatePayloadOrder(payload *entity.OrderPayload) error {
+func (p *purchaseHandler) validatePayloadOrder(payload *entity.OrderPayload) (error, int) {
 	// TODO: Optimize validation -> using any / in for select id
+	userLat := payload.UserLocation.Lat
+	userLong := payload.UserLocation.Long
+
 	startingPoints := 0
 	for _, order := range payload.Orders {
 		if order.StartingPoint {
@@ -148,37 +162,43 @@ func (p *purchaseHandler) validatePayloadOrder(payload *entity.OrderPayload) err
 		}
 
 		if _, err := ulid.Parse(order.MerchantId); err != nil {
-			return errors.New("merchant id not found")
+			return errors.New("merchant id not found"), http.StatusNotFound
 		}
 
 		var merchantId string
-		err := p.pool.QueryRow(context.Background(), `SELECT id FROM merchants WHERE id = $1`, order.MerchantId).Scan(&merchantId)
+		var lat, long float64
+		err := p.pool.QueryRow(context.Background(), `SELECT id, lat, long FROM merchants WHERE id = $1`, order.MerchantId).Scan(&merchantId, &lat, &long)
 		if err != nil {
-			return errors.New("merchant id not found")
+			return errors.New("merchant id not found"), http.StatusNotFound
+		}
+
+		distance := haversine(userLat, userLong, lat, long)
+		if order.StartingPoint && distance > 3 {
+			return errors.New("Merchant " + merchantId + " too far"), http.StatusBadRequest
 		}
 
 		if len(order.Items) < 1 {
-			return errors.New("item min 1 in merchant id: " + merchantId)
+			return errors.New("item min 1 in merchant id: " + merchantId), http.StatusBadRequest
 		}
 
 		for _, item := range order.Items {
 			_, err := ulid.Parse(item.ItemId)
 			if err != nil {
-				return errors.New("item id not found")
+				return errors.New("item id not found"), http.StatusNotFound
 			}
 
 			var itemId string
 
 			err = p.pool.QueryRow(context.Background(), `SELECT id FROM products WHERE id = $1 AND merchant_id = $2`, item.ItemId, merchantId).Scan(&itemId)
 			if err != nil {
-				return errors.New("item id " + item.ItemId + " not found")
+				return errors.New("item id " + item.ItemId + " not found"), http.StatusNotFound
 			}
 		}
 	}
 	if startingPoints != 1 {
-		return errors.New("invalid payload: exactly one order must have isStartingPoint set to true")
+		return errors.New("invalid payload: exactly one order must have isStartingPoint set to true"), http.StatusBadRequest
 	}
-	return nil
+	return nil, 0
 }
 
 func (p *purchaseHandler) calculateTotalPrice(orders []entity.Order) (float64, error) {
@@ -210,8 +230,6 @@ func calculateTotalTravelTime(payload entity.OrderPayload, merchants map[string]
 		}
 	}
 
-	// Calculate distance from user to starting point
-	totalDistance += haversine(userLocation.Lat, userLocation.Long, merchants[startingPointID].Lat, merchants[startingPointID].Long)
 
 	// Calculate distances between merchants
 	lastLocation := merchants[startingPointID]
@@ -222,39 +240,15 @@ func calculateTotalTravelTime(payload entity.OrderPayload, merchants map[string]
 		}
 	}
 
+	totalDistance += haversine(lastLocation.Lat, lastLocation.Long, userLocation.Lat, userLocation.Long)
+
 	// Convert distance to time (in minutes)
 	return totalDistance / DeliverySpeedKmPerMin
 }
 
-// Permutations generates all permutations of a slice of strings
-func permutations(arr []string) [][]string {
-	var helper func([]string, int)
-	res := [][]string{}
 
-	helper = func(arr []string, n int) {
-		if n == 1 {
-			tmp := make([]string, len(arr))
-			copy(tmp, arr)
-			res = append(res, tmp)
-		} else {
-			for i := 0; i < n; i++ {
-				helper(arr, n-1)
-				if n%2 == 1 {
-					arr[0], arr[n-1] = arr[n-1], arr[0]
-				} else {
-					arr[i], arr[n-1] = arr[n-1], arr[i]
-				}
-			}
-		}
-	}
-
-	helper(arr, len(arr))
-	return res
-}
-
-// Calculate total travel time using TSP
+// Calculate total travel time using Greedy Nearest Neighbor
 func calculateTotalTravelTimeTSP(userLocation entity.Coordinate, merchants map[string]entity.Coordinate, startingPointID string) float64 {
-	// Create a slice of merchant IDs excluding the starting point
 	merchantIDs := []string{}
 	for id := range merchants {
 		if id != startingPointID {
@@ -262,7 +256,6 @@ func calculateTotalTravelTimeTSP(userLocation entity.Coordinate, merchants map[s
 		}
 	}
 
-	// Handle the case with only one merchant
 	if len(merchantIDs) == 0 {
 		distance := haversine(userLocation.Lat, userLocation.Long, merchants[startingPointID].Lat, merchants[startingPointID].Long)
 		distance += haversine(merchants[startingPointID].Lat, merchants[startingPointID].Long, userLocation.Lat, userLocation.Long) // Distance back to user
@@ -270,27 +263,37 @@ func calculateTotalTravelTimeTSP(userLocation entity.Coordinate, merchants map[s
 		return distance / DeliverySpeedKmPerMin
 	}
 
-	// Generate all permutations of the merchant IDs
-	perms := permutations(merchantIDs)
-	log.Println(perms, merchantIDs, merchants, startingPointID)
+	visited := make(map[string]bool)
+	currentLocation := merchants[startingPointID]
+	totalDistance := 0.0
 
-	// Calculate the minimum travel distance
-	minDistance := math.MaxFloat64
-	for _, perm := range perms {
-		distance := 0.0
-		currentLocation := merchants[startingPointID]
-		for _, id := range perm {
-			distance += haversine(currentLocation.Lat, currentLocation.Long, merchants[id].Lat, merchants[id].Long)
-			currentLocation = merchants[id]
+	for i := 0; i < len(merchantIDs); i++ {
+		nearestMerchantID := ""
+		minDistance := math.MaxFloat64
+
+		for _, id := range merchantIDs {
+			if visited[id] {
+				continue
+			}
+
+			distance := haversine(currentLocation.Lat, currentLocation.Long, merchants[id].Lat, merchants[id].Long)
+			if distance < minDistance {
+				minDistance = distance
+				nearestMerchantID = id
+			}
 		}
-		distance += haversine(userLocation.Lat, userLocation.Long, merchants[startingPointID].Lat, merchants[startingPointID].Long) // Distance back to user
-		if distance < minDistance {
-			minDistance = distance
+
+		if nearestMerchantID != "" {
+			visited[nearestMerchantID] = true
+			totalDistance += minDistance
+			currentLocation = merchants[nearestMerchantID]
 		}
 	}
 
-	// Convert distance to time (in minutes)
-	return minDistance / DeliverySpeedKmPerMin
+	// Travel to the user's location after visiting all merchants
+	totalDistance += haversine(currentLocation.Lat, currentLocation.Long, userLocation.Lat, userLocation.Long)
+
+	return totalDistance / DeliverySpeedKmPerMin
 }
 
 // Calculate Haversine distance between two points
@@ -321,17 +324,24 @@ func (p *purchaseHandler) SaveEstimate(estimateId string, payload entity.OrderPa
 		}
 	}
 
+	p.Lock()
+	defer p.Unlock()
+
 	p.estimate[estimateId] = cacheEntimate
 }
 
 // PostOrder implements PurchaseHandler.
 func (p *purchaseHandler) PostOrder(c echo.Context) error {
 	var payload struct {
-		CalculatedEstimateId string `json:"calculatedEstimateId"`
+		CalculatedEstimateId string `json:"calculatedEstimateId" validate:"required"`
 	}
 
 	if err := c.Bind(&payload); err != nil {
 		return c.JSON(http.StatusBadRequest, exception.BadRequest("request doesn't pass validation"))
+	}
+
+	if err := c.Validate(payload); err != nil {
+		return c.JSON(http.StatusBadRequest, exception.BadRequest("request doesnt't pass validation"))
 	}
 
 	_, ok := p.estimate[payload.CalculatedEstimateId]
@@ -356,7 +366,7 @@ func (p *purchaseHandler) saveOrder(username string, orderId string, estimateId 
 		panic(err)
 	}
 	defer func() {
-		err := recover().(error)
+		err := recover()
 		if err != nil {
 			tx.Rollback(context.Background())
 		} else {
@@ -372,6 +382,8 @@ func (p *purchaseHandler) saveOrder(username string, orderId string, estimateId 
 
 	query2 := "INSERT INTO order_items(order_id, merchant_id, item_id, quantity) VALUES($1, $2, $3, $4)"
 
+	p.Lock()
+	defer p.Unlock()
 	cacheEtimate := p.estimate[estimateId]
 
 	for _, item := range cacheEtimate {
@@ -381,4 +393,6 @@ func (p *purchaseHandler) saveOrder(username string, orderId string, estimateId 
 			panic(err)
 		}
 	}
+
+	delete(p.estimate, estimateId)
 }

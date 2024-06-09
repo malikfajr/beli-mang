@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -45,6 +46,7 @@ func getMaxPool(ctx context.Context, url string) (int, error) {
 func NewPool(ctx context.Context, url string) *pgxpool.Pool {
 	pgConfig, err := pgxpool.ParseConfig(url)
 	if err != nil {
+		log.Println("db url = " + url)
 		log.Fatal("Cannot parsing database url", err)
 		os.Exit(1)
 	}
@@ -72,5 +74,9 @@ func NewPool(ctx context.Context, url string) *pgxpool.Pool {
 }
 
 func Address() string {
-	return fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?%s", os.Getenv("DB_USERNAME"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_HOST"), os.Getenv("DN_PORT"), os.Getenv("DB_NAME"), os.Getenv("DB_PARAMS"))
+	return fmt.Sprintf("postgresql://%s:%s@%s:%s/%s?%s", os.Getenv("DB_USERNAME"), os.Getenv("DB_PASSWORD"), os.Getenv("DB_HOST"), os.Getenv("DB_PORT"), os.Getenv("DB_NAME"), os.Getenv("DB_PARAMS"))
+}
+
+func Escape(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }

@@ -27,5 +27,25 @@ type OrderResponse struct {
 }
 
 type OrderHistory struct {
-	OrderId string `json:"orderId"`
+	OrderId string        `json:"orderId"`
+	Orders  []OrderDetail `json:"orders"`
+}
+
+type ItemHistory struct {
+	Product
+	Quantity int `json:"quantity"`
+}
+
+type OrderDetail struct {
+	Merchant Merchant      `json:"merchant"`
+	Items    []ItemHistory `json:"items"`
+}
+
+type OrderHistoryParams struct {
+	Limit            uint   `json:"-" query:"limit"`
+	Offset           uint   `json:"-" query:"offset"`
+	MerchantId       string `json:"-" query:"merchantId"`
+	MerchantCategory string `json:"-" query:"merchantCategory"`
+	Name             string `json:"-" query:"name"`
+	Username         string
 }
