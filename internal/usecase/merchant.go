@@ -13,7 +13,7 @@ import (
 
 type manageMerchant struct {
 	pool *pgxpool.Pool
-	id   map[string]string
+	id   map[string]bool
 	sync.Mutex
 }
 
@@ -28,7 +28,7 @@ type ManageMerchant interface {
 func NewManageMerchant(pool *pgxpool.Pool) ManageMerchant {
 	return &manageMerchant{
 		pool: pool,
-		id:   map[string]string{},
+		id:   make(map[string]bool),
 	}
 }
 
@@ -52,7 +52,7 @@ func (m *manageMerchant) Create(ctx context.Context, username string, payload *e
 
 	m.Lock()
 	defer m.Unlock()
-	m.id[merchant.Id] = username
+	m.id[merchant.Id] = true
 
 	return merchant, nil
 }
@@ -74,7 +74,7 @@ func (m *manageMerchant) GetAll(ctx context.Context, username string, params *en
 }
 
 func (m *manageMerchant) AddProduct(ctx context.Context, merchantId string, payload *entity.AddProductPayload) (*entity.Product, error) {
-	if err := m.isFound(nil, merchantId); err != nil {
+	if err := m.isFound(merchantId); err != nil {
 		return nil, err
 	}
 
@@ -97,7 +97,7 @@ func (m *manageMerchant) AddProduct(ctx context.Context, merchantId string, payl
 }
 
 func (m *manageMerchant) GetProducts(ctx context.Context, username string, params *entity.ProductParams) (*[]entity.Product, int, error) {
-	if err := m.isFound(&username, params.MerchantId); err != nil {
+	if err := m.isFound(params.MerchantId); err != nil {
 		return nil, 0, err
 	}
 
@@ -116,7 +116,7 @@ func (m *manageMerchant) GetProducts(ctx context.Context, username string, param
 	return &products, total, nil
 }
 
-func (m *manageMerchant) isFound(username *string, merchantId string) error {
+func (m *manageMerchant) isFound(merchantId string) error {
 	_, err := ulid.Parse(merchantId)
 	if err != nil {
 		return exception.NotFound("merchantId not found")
@@ -125,11 +125,7 @@ func (m *manageMerchant) isFound(username *string, merchantId string) error {
 	m.Lock()
 	defer m.Unlock()
 
-	if user, ok := m.id[merchantId]; username != nil && ok {
-		if user != *username {
-			return exception.NotFound("merchantId not found")
-		}
-
+	if _, ok := m.id[merchantId]; ok {
 		return nil
 	}
 
@@ -139,11 +135,7 @@ func (m *manageMerchant) isFound(username *string, merchantId string) error {
 		return exception.NotFound("merchantId not found")
 	}
 
-	m.id[merchant.Id] = merchant.Username
-
-	if username != nil && *username != merchant.Username {
-		return exception.NotFound("merchantId not found")
-	}
+	m.id[merchant.Id] = true
 
 	return nil
 }
@@ -152,7 +144,7 @@ func (m *manageMerchant) ResetData() {
 	m.Lock()
 	defer m.Unlock()
 
-	m.id = make(map[string]string, 0)
+	m.id = make(map[string]bool)
 }
 
 func validOrder(key string) bool {

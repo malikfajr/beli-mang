@@ -177,9 +177,9 @@ func (p *purchaseHandler) validatePayloadOrder(payload *entity.OrderPayload) (er
 			return errors.New("Merchant " + merchantId + " too far"), http.StatusBadRequest
 		}
 
-		if len(order.Items) < 1 {
-			return errors.New("item min 1 in merchant id: " + merchantId), http.StatusBadRequest
-		}
+		// if len(order.Items) < 1 {
+		// 	return errors.New("item min 1 in merchant id: " + merchantId), http.StatusBadRequest
+		// }
 
 		for _, item := range order.Items {
 			_, err := ulid.Parse(item.ItemId)
@@ -230,7 +230,6 @@ func calculateTotalTravelTime(payload entity.OrderPayload, merchants map[string]
 		}
 	}
 
-
 	// Calculate distances between merchants
 	lastLocation := merchants[startingPointID]
 	for _, order := range payload.Orders {
@@ -245,7 +244,6 @@ func calculateTotalTravelTime(payload entity.OrderPayload, merchants map[string]
 	// Convert distance to time (in minutes)
 	return totalDistance / DeliverySpeedKmPerMin
 }
-
 
 // Calculate total travel time using Greedy Nearest Neighbor
 func calculateTotalTravelTimeTSP(userLocation entity.Coordinate, merchants map[string]entity.Coordinate, startingPointID string) float64 {
@@ -310,6 +308,9 @@ func toRadians(degree float64) float64 {
 }
 
 func (p *purchaseHandler) SaveEstimate(estimateId string, payload entity.OrderPayload) {
+	p.Lock()
+	defer p.Unlock()
+
 	cacheEntimate := []CacheEstimate{}
 
 	for _, order := range payload.Orders {
@@ -323,9 +324,6 @@ func (p *purchaseHandler) SaveEstimate(estimateId string, payload entity.OrderPa
 			cacheEntimate = append(cacheEntimate, temp)
 		}
 	}
-
-	p.Lock()
-	defer p.Unlock()
 
 	p.estimate[estimateId] = cacheEntimate
 }
@@ -344,7 +342,10 @@ func (p *purchaseHandler) PostOrder(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, exception.BadRequest("request doesnt't pass validation"))
 	}
 
+	p.Lock()
 	_, ok := p.estimate[payload.CalculatedEstimateId]
+	p.Unlock()
+
 	if !ok {
 		return c.JSON(http.StatusNotFound, exception.NotFound("calculatedEstimateId is not found"))
 	}
@@ -361,33 +362,21 @@ func (p *purchaseHandler) PostOrder(c echo.Context) error {
 }
 
 func (p *purchaseHandler) saveOrder(username string, orderId string, estimateId string) {
-	tx, err := p.pool.Begin(context.Background())
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		err := recover()
-		if err != nil {
-			tx.Rollback(context.Background())
-		} else {
-			tx.Commit(context.Background())
-		}
-	}()
+	p.Lock()
+	defer p.Unlock()
 
 	query1 := "INSERT INTO orders(id, username) VALUES($1, $2)"
-	_, err = tx.Exec(context.Background(), query1, orderId, username)
+	_, err := p.pool.Exec(context.Background(), query1, orderId, username)
 	if err != nil {
 		panic(err)
 	}
 
 	query2 := "INSERT INTO order_items(order_id, merchant_id, item_id, quantity) VALUES($1, $2, $3, $4)"
 
-	p.Lock()
-	defer p.Unlock()
 	cacheEtimate := p.estimate[estimateId]
 
 	for _, item := range cacheEtimate {
-		_, err := tx.Exec(context.Background(), query2, orderId, item.MerchantId, item.ProductId,
+		_, err := p.pool.Exec(context.Background(), query2, orderId, item.MerchantId, item.ProductId,
 			item.Qty)
 		if err != nil {
 			panic(err)
