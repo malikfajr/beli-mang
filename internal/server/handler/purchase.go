@@ -354,7 +354,8 @@ func (p *purchaseHandler) PostOrder(c echo.Context) error {
 
 	orderId := ulid.Make().String()
 
-	go p.saveOrder(user.Username, orderId, payload.CalculatedEstimateId)
+	// go p.saveOrder(user.Username, orderId, payload.CalculatedEstimateId)
+	p.saveOrder(user.Username, orderId, payload.CalculatedEstimateId)
 
 	return c.JSON(http.StatusCreated, entity.OrderResponse{
 		OrderId: orderId,
